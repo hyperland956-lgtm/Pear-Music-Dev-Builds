@@ -11,20 +11,10 @@ env:
 jobs:
   build:
     name: Build Pear Desktop
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false # Changed to false so if Mac fails, Windows keeps trying
-      matrix:
-        os: [ macos-latest, ubuntu-latest, windows-latest ]
-
+    # FORCE LINUX (Since Windows fails with file errors)
+    runs-on: ubuntu-latest
+    
     steps:
-      # --- FIX FOR WINDOWS ASSETS (ENOENT ERROR) ---
-      - name: Configure Git (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          git config --global core.symlinks true
-          git config --global core.longpaths true
-
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
@@ -45,34 +35,29 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # --- UNIFIED BUILD STEP ---
-      # This runs the standard build on all OSs to ensure code validity.
-      # We removed the "if: github.repository..." check so it runs on your fork.
-      - name: Run Build
+      # --- 1. COMPILE SOURCE CODE (Will work now because we are on Linux) ---
+      - name: Compile Code (Vite)
         run: pnpm build
 
-      # --- RELEASE STEPS (OPTIONAL FOR FORKS) ---
-      # These might fail if you don't have the signing secrets (GH_TOKEN/Certificates).
-      # I have enabled them to attempt a build, but if they fail on signing, 
-      # at least the 'Run Build' step above confirms the code works.
-
-      - name: Package Mac (Dry Run)
-        if: startsWith(matrix.os, 'macOS')
-        run: pnpm electron-vite build 
-
-      - name: Package Linux
-        if: startsWith(matrix.os, 'ubuntu')
+      # --- 2. BUILD FOR WINDOWS (Using Linux Runner) ---
+      # This requires Wine, which we install below.
+      - name: Build Windows Exe on Linux
+        # Only run this if you actually want the .exe artifact
         run: |
-          sudo snap install snapcraft --classic
-          sudo apt update
-          sudo apt install -y flatpak flatpak-builder
-          # We run the build command instead of release to avoid signing errors on forks
-          pnpm build
+          # Install Wine (needed to cross-compile for Windows)
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y wine32 wine64
 
-      - name: Package Windows
-        if: startsWith(matrix.os, 'windows')
-        run: |
-          # We run the build command explicitly. 
-          # If you want to create the .exe installer, you usually need signing keys.
-          # 'pnpm build' verifies the assets exist and code compiles.
-          pnpm build
+          # Run the Windows build command
+          # The --win flag tells electron-builder to target Windows
+          npx electron-builder --win --x64
+        env:
+           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- 3. UPLOAD THE ARTIFACTS ---
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pear-desktop-windows
+          path: dist/*.exe
