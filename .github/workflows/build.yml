@@ -5,6 +5,9 @@ on:
     branches: [ master, main ]
   pull_request:
 
+permissions:
+  contents: write # REQUIRED to create releases
+
 env:
   NODE_VERSION: "22.x"
 
@@ -34,31 +37,28 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # --- 1. COMPILE SOURCE CODE ---
       - name: Compile Code (Vite)
         run: pnpm build
 
-      # --- 2. BUILD FOR WINDOWS (ON LINUX) ---
       - name: Build Windows Exe on Linux
         run: |
-          # Install Wine (required for Windows builds on Linux)
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine32 wine64
-
-          # Build the Windows binary
           npx electron-builder --win --x64
         env:
            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- DEBUG STEP (In case it fails again, check logs here) ---
-      - name: List all generated files
-        run: find . -name "*.exe"
-
-      # --- 3. UPLOAD ARTIFACTS ---
-      - name: Upload Windows Artifacts
-        uses: actions/upload-artifact@v4
+      # --- THIS CREATES A RELEASE ---
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: pear-desktop-windows
-          # The double star ** finds the file in ANY subfolder (dist, release, out, etc.)
-          path: "**/*.exe"
+          tag_name: nightly
+          name: Nightly Build
+          draft: false
+          prerelease: true
+          # This overwrites the previous 'nightly' release so you always have the latest
+          make_latest: true 
+          files: pack/*.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
