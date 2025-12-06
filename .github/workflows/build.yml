@@ -19,10 +19,18 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
-      - name: Enable Symlinks (Windows)
-        run: git config --global core.symlinks true
+      # 1. Configure Git settings BEFORE checking out code
+      - name: Configure Git (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          git config --global core.symlinks true
+          git config --global core.longpaths true
+
+      # 2. Checkout Code (Now it will respect the settings above)
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       # 1. Setup Node.js v22 (Same as your notebook)
       - name: Setup Node.js
