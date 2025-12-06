@@ -19,6 +19,8 @@ jobs:
         os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
+      - name: Enable Symlinks (Windows)
+        run: git config --global core.symlinks true
       - name: Checkout Code
         uses: actions/checkout@v4
 
