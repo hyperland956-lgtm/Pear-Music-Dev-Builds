@@ -1,171 +1,78 @@
-name: Build Pear Desktop
+name: Dev Builds
 
+# Triggers: Runs when you sync the fork (push to main) or manually click Run
 on:
   push:
-    branches: [ master ]
-  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
 
-env:
-  NODE_VERSION: "22.x"
+permissions:
+  contents: write
 
 jobs:
-  build:
-    if: github.event.pull_request.draft == false
-    name: Build Pear Desktop
+  build-and-release:
+    name: Build for ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        os: [ macos-latest, ubuntu-latest, windows-latest ]
+        os: [windows-latest, ubuntu-latest, macos-latest]
 
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
+      # 1. Setup Node.js v22 (Same as your notebook)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          version: 10
-          run_install: false
+          node-version: 22
 
-      - name: Setup NodeJS
-        if: startsWith(matrix.os, 'macOS') != true
-        uses: actions/setup-node@v5
+      # 2. Install PNPM
+      - name: Setup PNPM
+        uses: pnpm/action-setup@v3
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
+          version: 9
 
-      - name: Setup NodeJS for macOS
-        if: startsWith(matrix.os, 'macOS')
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      # Only vite build without release if it is a fork, or it is a pull-request
-      - name: Vite Build
-        if: github.repository == 'pear-devs/pear-desktop' && github.event_name == 'pull_request'
+      # 3. Get Date and Short Hash (For Naming)
+      - name: Generate Build Name
+        id: vars
+        shell: bash
         run: |
-          pnpm build
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
-      # Build and release if it's the main repository and is not pull-request
-      - name: Build and release on Mac
-        if: startsWith(matrix.os, 'macOS') && (github.repository == 'pear-devs/pear-desktop' && github.event_name != 'pull_request')
+      # 4. Install Dependencies
+      - name: Install Dependencies
+        run: pnpm install
+
+      # 5. Build the Source Code (Bake the cake)
+        # We skip type checking to speed it up for dev builds
+      - name: Compile Source
+        run: pnpm build
+
+      # 6. Package the App (Box the cake)
+      - name: Package Application
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          pnpm release:mac
+          if [ "$RUNNER_OS" == "Windows" ]; then
+            npx electron-builder --win --x64 --publish never
+          elif [ "$RUNNER_OS" == "Linux" ]; then
+            npx electron-builder --linux appimage --x64 --publish never
+          elif [ "$RUNNER_OS" == "macOS" ]; then
+            npx electron-builder --mac --x64 --publish never
+          fi
+        shell: bash
 
-      - name: Build and release on Linux
-        if: startsWith(matrix.os, 'ubuntu') && (github.repository == 'pear-devs/pear-desktop' && github.event_name != 'pull_request')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          sudo snap install snapcraft --classic
-          sudo apt update
-          sudo apt install -y flatpak flatpak-builder
-          sudo flatpak remote-add --if-not-exists --system flathub https://flathub.org/repo/flathub.flatpakrepo
-          sudo flatpak install -y flathub org.freedesktop.Platform/x86_64/24.08
-          sudo flatpak install -y flathub org.freedesktop.Sdk/x86_64/24.08
-          sudo flatpak install -y flathub org.electronjs.Electron2.BaseApp/x86_64/24.08
-          pnpm release:linux
-
-      - name: Build and release on Windows
-        if: startsWith(matrix.os, 'windows') && (github.repository == 'pear-devs/pear-desktop' && github.event_name != 'pull_request')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          pnpm release:win
-
-      - name: Test
-        uses: coactions/setup-xvfb@v1
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+      # 7. Upload to Releases
+      - name: Upload Binaries to Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/') != true # Run on normal pushes
         with:
-          run: pnpm test:debug
-
-
-  release:
-    runs-on: ubuntu-latest
-    name: Release Pear Desktop
-    if: github.repository == 'pear-devs/pear-desktop' && github.ref == 'refs/heads/master'
-    needs: build
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
-      - name: Setup NodeJS
-        if: startsWith(matrix.os, 'macOS') != true
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Setup NodeJS for macOS
-        if: startsWith(matrix.os, 'macOS')
-        uses: actions/setup-node@v5
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Get version
-        run: |
-          echo "VERSION_TAG=v$(node -pe "require('./package.json').version")" >> $GITHUB_ENV
-
-      - name: Check if version already exists in tags
-        run: |
-          echo "VERSION_HASH=$(git rev-parse -q --verify 'refs/tags/${{ env.VERSION_TAG }}')" >> $GITHUB_ENV
-          echo "CHANGELOG_ANCHOR=$(echo $VERSION_TAG | sed -e 's/\.//g')" >> $GITHUB_ENV
-
-      - name: Fetch draft release
-        if: ${{ env.VERSION_HASH == '' }}
-        uses: cardinalby/git-get-release-action@v1
-        id: get_draft_release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          latest: true
-          draft: true
-          searchLimit: 1
-
-      - name: Publish Release (if it does not exist)
-        if: ${{ env.VERSION_HASH == '' }}
-        uses: irongut/EditRelease@v1.2.0
-        with:
-          token: ${{ secrets.GH_TOKEN }}
-          id: ${{ steps.get_draft_release.outputs.id }}
-          draft: false
-          prerelease: false
-          replacename: true
-          name: ${{ env.VERSION_TAG }}
-          replacebody: true
-          body: |
-            See [changelog](https://github.com/pear-devs/pear-desktop/blob/master/changelog.md#${{ env.CHANGELOG_ANCHOR }}) for the list of updates and the full diff.
-
-            Thanks to all contributors! 🏅
-
-            (Note for Windows: `Pear-Desktop-Web-Setup-${{ env.VERSION_TAG }}.exe` is an installer, and `Pear-Desktop-${{ env.VERSION_TAG }}.exe` is a portable version)
-
-      - name: Update changelog
-        if: ${{ env.VERSION_HASH == '' }}
-        run: |
-          pnpm changelog
-
-      - name: Commit changelog
-        if: ${{ env.VERSION_HASH == '' }}
-        uses: stefanzweifel/git-auto-commit-action@v6
-        with:
-          commit_message: Update changelog for ${{ env.VERSION_TAG }}
-          file_pattern: "changelog.md"
-          commit_user_name: CI
-          commit_user_email: th-ch@users.noreply.github.com
+          name: "Dev Build ${{ steps.vars.outputs.date }}" # Title: Dev Build 2025-12-06
+          tag_name: "build-${{ steps.vars.outputs.date }}-${{ steps.vars.outputs.sha_short }}" # Tag: build-2025-12-06-a1b2c
+          files: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.dmg
