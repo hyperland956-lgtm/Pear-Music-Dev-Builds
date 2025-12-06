@@ -32,7 +32,7 @@ jobs:
       - name: Setup PNPM
         uses: pnpm/action-setup@v3
         with:
-          version: 9
+          version: 10
 
       # 3. Get Date and Short Hash (For Naming)
       - name: Generate Build Name
