@@ -1,18 +1,4 @@
-name: Build Pear Desktop
-
-on:
-  push:
-    branches: [ master, main ]
-  pull_request:
-
-permissions:
-  contents: write # REQUIRED to create releases
-
-env:
-  NODE_VERSION: "22.x"
-
-jobs:
-  # JOB 1: Build Windows & Linux (Runs on Ubuntu)
+# JOB 1: Build Windows & Linux (Runs on Ubuntu)
   build-win-linux:
     name: Build Windows & Linux
     runs-on: ubuntu-latest
@@ -41,16 +27,18 @@ jobs:
       - name: Compile Code (Vite)
         run: pnpm build
 
-      # YOUR EXISTING WINDOWS SETUP (Plus Linux)
       - name: Build Windows & Linux
         run: |
-          # Install Wine for Windows build (Keep this!)
+          # Install Wine (for Windows builds) and basic Linux tools
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine32 wine64
           
-          # Build Windows (exe) AND Linux (AppImage, deb)
-          npx electron-builder --win --linux --x64
+          # COMMAND EXPLANATION:
+          # --win --linux : Build for Windows and Linux
+          # AppImage deb rpm snap : Build these specific Linux formats (Skipping Flatpak to fix crash)
+          # --x64 --arm64 --ia32 : Build Standard(64), ARM(64), and Old(32) chips
+          npx electron-builder --win --linux AppImage deb rpm snap --x64 --arm64 --ia32
         env:
            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -62,61 +50,12 @@ jobs:
           draft: false
           prerelease: true
           make_latest: true
-          # Uploads Windows .exe and common Linux formats
+          # This wildcard pattern captures all the new architectures automatically
           files: |
             pack/*.exe
             pack/*.AppImage
             pack/*.deb
             pack/*.rpm
             pack/*.snap
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # JOB 2: Build macOS (Must run on Mac)
-  build-mac:
-    name: Build macOS
-    runs-on: macos-latest
-    
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 10
-          run_install: false
-
-      - name: Setup NodeJS
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'pnpm'
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Compile Code (Vite)
-        run: pnpm build
-
-      - name: Build macOS
-        # Builds .dmg and .zip for Mac
-        run: npx electron-builder --mac --x64 --arm64
-        env:
-           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Upload Mac to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: nightly
-          name: Nightly Build
-          draft: false
-          prerelease: true
-          # Note: We don't need 'make_latest' here, the other job handles it
-          files: |
-            pack/*.dmg
-            pack/*.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
