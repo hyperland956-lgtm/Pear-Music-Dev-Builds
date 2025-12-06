@@ -11,7 +11,6 @@ env:
 jobs:
   build:
     name: Build Pear Desktop
-    # FORCE LINUX (Since Windows fails with file errors)
     runs-on: ubuntu-latest
     
     steps:
@@ -35,29 +34,31 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # --- 1. COMPILE SOURCE CODE (Will work now because we are on Linux) ---
+      # --- 1. COMPILE SOURCE CODE ---
       - name: Compile Code (Vite)
         run: pnpm build
 
-      # --- 2. BUILD FOR WINDOWS (Using Linux Runner) ---
-      # This requires Wine, which we install below.
+      # --- 2. BUILD FOR WINDOWS (ON LINUX) ---
       - name: Build Windows Exe on Linux
-        # Only run this if you actually want the .exe artifact
         run: |
-          # Install Wine (needed to cross-compile for Windows)
+          # Install Wine (required for Windows builds on Linux)
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine32 wine64
 
-          # Run the Windows build command
-          # The --win flag tells electron-builder to target Windows
+          # Build the Windows binary
           npx electron-builder --win --x64
         env:
            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # --- 3. UPLOAD THE ARTIFACTS ---
+      # --- DEBUG STEP (In case it fails again, check logs here) ---
+      - name: List all generated files
+        run: find . -name "*.exe"
+
+      # --- 3. UPLOAD ARTIFACTS ---
       - name: Upload Windows Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: pear-desktop-windows
-          path: dist/*.exe
+          # The double star ** finds the file in ANY subfolder (dist, release, out, etc.)
+          path: "**/*.exe"
