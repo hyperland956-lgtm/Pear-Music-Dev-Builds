@@ -1,4 +1,4 @@
-name: Build All Platforms
+name: Build Pear Desktop
 
 on:
   push:
@@ -6,41 +6,17 @@ on:
   pull_request:
 
 permissions:
-  contents: write
+  contents: write # REQUIRED to create releases
+
+env:
+  NODE_VERSION: "22.x"
 
 jobs:
-  release:
-    name: Build ${{ matrix.platform }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # --- WINDOWS JOB ---
-          - os: windows-latest
-            platform: Windows
-            # Builds .exe
-            build_cmd: npx electron-builder --win --x64
-            # Uploads the Installer
-            file_pattern: "pack/*.exe"
-
-          # --- MACOS JOB ---
-          - os: macos-latest
-            platform: macOS
-            # Builds .dmg and .zip
-            build_cmd: npx electron-builder --mac --x64
-            # Uploads DMG and ZIP
-            file_pattern: "pack/*.dmg pack/*.zip"
-
-          # --- LINUX JOB ---
-          - os: ubuntu-latest
-            platform: Linux
-            # Builds AppImage and Deb (add 'rpm' or 'snap' here if you want them)
-            build_cmd: npx electron-builder --linux --x64 deb appimage
-            # Uploads AppImage and Deb
-            file_pattern: "pack/*.AppImage pack/*.deb"
-
-    runs-on: ${{ matrix.os }}
-
+  # JOB 1: Build Windows & Linux (Runs on Ubuntu)
+  build-win-linux:
+    name: Build Windows & Linux
+    runs-on: ubuntu-latest
+    
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -56,31 +32,91 @@ jobs:
       - name: Setup NodeJS
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ env.NODE_VERSION }}
           cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # Compile the source code (Vite)
-      - name: Compile Code
+      - name: Compile Code (Vite)
         run: pnpm build
 
-      # Package the app using the command defined in the matrix above
-      - name: Build Electron App
+      # YOUR EXISTING WINDOWS SETUP (Plus Linux)
+      - name: Build Windows & Linux
+        run: |
+          # Install Wine for Windows build (Keep this!)
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y wine32 wine64
+          
+          # Build Windows (exe) AND Linux (AppImage, deb)
+          npx electron-builder --win --linux --x64
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: ${{ matrix.build_cmd }}
+           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # Upload artifacts to the 'nightly' release
-      - name: Upload to Release
+      - name: Upload Win/Linux to Release
         uses: softprops/action-gh-release@v2
-        if: github.event_name == 'push' # Only upload if we pushed code, not on PRs
         with:
           tag_name: nightly
           name: Nightly Build
           draft: false
           prerelease: true
-          files: ${{ matrix.file_pattern }}
-          # This ensures that multiple jobs can update the release simultaneously
           make_latest: true
+          # Uploads Windows .exe and common Linux formats
+          files: |
+            pack/*.exe
+            pack/*.AppImage
+            pack/*.deb
+            pack/*.rpm
+            pack/*.snap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # JOB 2: Build macOS (Must run on Mac)
+  build-mac:
+    name: Build macOS
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compile Code (Vite)
+        run: pnpm build
+
+      - name: Build macOS
+        # Builds .dmg and .zip for Mac
+        run: npx electron-builder --mac --x64 --arm64
+        env:
+           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Mac to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          draft: false
+          prerelease: true
+          # Note: We don't need 'make_latest' here, the other job handles it
+          files: |
+            pack/*.dmg
+            pack/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
