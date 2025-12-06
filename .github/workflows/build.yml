@@ -1,4 +1,4 @@
-name: Build Pear Desktop
+name: Build All Platforms
 
 on:
   push:
@@ -6,16 +6,41 @@ on:
   pull_request:
 
 permissions:
-  contents: write # REQUIRED to create releases
-
-env:
-  NODE_VERSION: "22.x"
+  contents: write
 
 jobs:
-  build:
-    name: Build Pear Desktop
-    runs-on: ubuntu-latest
-    
+  release:
+    name: Build ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- WINDOWS JOB ---
+          - os: windows-latest
+            platform: Windows
+            # Builds .exe
+            build_cmd: npx electron-builder --win --x64
+            # Uploads the Installer
+            file_pattern: "pack/*.exe"
+
+          # --- MACOS JOB ---
+          - os: macos-latest
+            platform: macOS
+            # Builds .dmg and .zip
+            build_cmd: npx electron-builder --mac --x64
+            # Uploads DMG and ZIP
+            file_pattern: "pack/*.dmg pack/*.zip"
+
+          # --- LINUX JOB ---
+          - os: ubuntu-latest
+            platform: Linux
+            # Builds AppImage and Deb (add 'rpm' or 'snap' here if you want them)
+            build_cmd: npx electron-builder --linux --x64 deb appimage
+            # Uploads AppImage and Deb
+            file_pattern: "pack/*.AppImage pack/*.deb"
+
+    runs-on: ${{ matrix.os }}
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -31,34 +56,31 @@ jobs:
       - name: Setup NodeJS
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
+          node-version: 22
           cache: 'pnpm'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Compile Code (Vite)
+      # Compile the source code (Vite)
+      - name: Compile Code
         run: pnpm build
 
-      - name: Build Windows Exe on Linux
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get update
-          sudo apt-get install -y wine32 wine64
-          npx electron-builder --win --x64
+      # Package the app using the command defined in the matrix above
+      - name: Build Electron App
         env:
-           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ${{ matrix.build_cmd }}
 
-      # --- THIS CREATES A RELEASE ---
+      # Upload artifacts to the 'nightly' release
       - name: Upload to Release
         uses: softprops/action-gh-release@v2
+        if: github.event_name == 'push' # Only upload if we pushed code, not on PRs
         with:
           tag_name: nightly
           name: Nightly Build
           draft: false
           prerelease: true
-          # This overwrites the previous 'nightly' release so you always have the latest
-          make_latest: true 
-          files: pack/*.exe
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          files: ${{ matrix.file_pattern }}
+          # This ensures that multiple jobs can update the release simultaneously
+          make_latest: true
