@@ -1,4 +1,18 @@
-# JOB 1: Build Windows & Linux (Runs on Ubuntu)
+name: Build Pear Desktop
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "22.x"
+
+jobs:
+  # JOB 1: Windows Portable & Minimal Linux
   build-win-linux:
     name: Build Windows & Linux
     runs-on: ubuntu-latest
@@ -27,22 +41,22 @@
       - name: Compile Code (Vite)
         run: pnpm build
 
-      - name: Build Windows & Linux
+      - name: Build Windows (Portable) & Linux (AppImage)
         run: |
-          # Install Wine (for Windows builds) and basic Linux tools
+          # Install Wine for Windows build
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y wine32 wine64
           
-          # COMMAND EXPLANATION:
-          # --win --linux : Build for Windows and Linux
-          # AppImage deb rpm snap : Build these specific Linux formats (Skipping Flatpak to fix crash)
-          # --x64 --arm64 --ia32 : Build Standard(64), ARM(64), and Old(32) chips
-          npx electron-builder --win --linux AppImage deb rpm snap --x64 --arm64 --ia32
+          # COMMAND CHANGED:
+          # --win portable : Creates a standalone .exe (no installer)
+          # --linux appimage : Creates a standalone Linux file (no installer)
+          # --x64 : Only build for standard 64-bit computers (removes arm/32bit clutter)
+          npx electron-builder --win portable --linux appimage --x64
         env:
            GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Win/Linux to Release
+      - name: Upload Artifacts
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
@@ -50,12 +64,55 @@
           draft: false
           prerelease: true
           make_latest: true
-          # This wildcard pattern captures all the new architectures automatically
           files: |
             pack/*.exe
             pack/*.AppImage
-            pack/*.deb
-            pack/*.rpm
-            pack/*.snap
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # JOB 2: Minimal macOS
+  build-mac:
+    name: Build macOS
+    runs-on: macos-latest
+    
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Setup NodeJS
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Compile Code (Vite)
+        run: pnpm build
+
+      - name: Build macOS (DMG only)
+        # Only builds .dmg (standard mac disk image)
+        run: npx electron-builder --mac dmg --x64 --arm64
+        env:
+           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Mac Artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          name: Nightly Build
+          draft: false
+          prerelease: true
+          files: |
+            pack/*.dmg
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
