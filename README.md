@@ -1,5 +1,6 @@
 <div align="center">
-
+E
+  
 # :pear: Pear Desktop
 
 [![GitHub release](https://img.shields.io/github/release/pear-devs/pear-desktop.svg?style=for-the-badge)](https://github.com/pear-devs/pear-desktop/releases/)
